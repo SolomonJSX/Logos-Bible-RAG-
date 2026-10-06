@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+.env
+
+# Large model binaries & generated data
+*.gguf
+*.bin
+*.hprof
+data/output/
+
+# Android build & caches
+android/.gradle/
+android/build/
+android/.cxx/
+android/local.properties
+android/captures/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# C++ / CMake build outputs
+cpp/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.obj
+*.lib
+*.a
+*.dll
+*.dylib
+
+# IDE & Editor
+.idea/
+android/.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs & temp
+*.log
