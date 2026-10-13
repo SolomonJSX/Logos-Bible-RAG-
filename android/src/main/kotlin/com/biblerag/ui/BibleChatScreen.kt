@@ -1,5 +1,6 @@
 package com.biblerag.ui
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
@@ -11,11 +12,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MenuBook
@@ -26,12 +30,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.biblerag.R
 import com.biblerag.core.NativeSearchResult
 
@@ -50,11 +56,35 @@ private val UserBubble = Color(0xFF2B1C12)
 fun BibleChatScreen(viewModel: ChatViewModel) {
     val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("logos_chat_prefs", Context.MODE_PRIVATE) }
+    var showReasoningHint by remember {
+        mutableStateOf(!prefs.getBoolean("has_seen_reasoning_hint", false))
+    }
+    var showScribeBio by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text) {
+    // Автоскролл к самому низу при генерации контента, новых сообщениях или раскрытии цитат
+    val lastMessage = state.messages.lastOrNull()
+    LaunchedEffect(
+        state.messages.size,
+        lastMessage?.text,
+        lastMessage?.visibleCitationCount,
+        lastMessage?.citations?.size,
+        state.isGenerating
+    ) {
         if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+            if (state.isGenerating) {
+                // Во время активной генерации мгновенно удерживаем скролл на самом низу
+                listState.scrollToItem(state.messages.lastIndex, scrollOffset = 100000)
+            } else {
+                // После генерации или раскрытия карточек плавно докручиваем вниз
+                listState.animateScrollToItem(state.messages.lastIndex, scrollOffset = 100000)
+            }
         }
+    }
+
+    if (showScribeBio) {
+        ScribeBiographyDialog(onDismiss = { showScribeBio = false })
     }
 
     Scaffold(
@@ -63,7 +93,10 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showScribeBio = true }
+                            .padding(vertical = 4.dp, horizontal = 2.dp)
                     ) {
                         // Портрет Писаря Соломона в золотом медальоне
                         Box(
@@ -100,13 +133,13 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                     }
                 },
                 actions = {
-                    // Переключатель режима размышления
+                    // Переключатель режима размышления (вместо технического имени Qwen)
                     FilterChip(
                         selected = state.useNeuralLlm,
                         onClick = { viewModel.setNeuralLlmEnabled(!state.useNeuralLlm) },
                         label = {
                             Text(
-                                text = if (state.useNeuralLlm) "🧠 Qwen 1.5B" else "⚡ Экспресс",
+                                text = if (state.useNeuralLlm) "🧠 Размышление" else "⚡ Экспресс",
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Serif,
                                 fontWeight = FontWeight.SemiBold,
@@ -231,21 +264,110 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
             }
         }
     ) { innerPadding ->
-        LazyColumn(
-            state = listState,
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(ChatBg)
                 .padding(innerPadding)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(state.messages, key = { it.id }) { msg ->
-                ScribeMessageItem(
-                    message = msg,
-                    onLoadMore = viewModel::loadMoreCitations,
-                    onCollapse = viewModel::collapseCitations
-                )
+            // Подсказка при первом открытии о переключении в режим «Размышление»
+            AnimatedVisibility(visible = showReasoningHint) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    color = Color(0xFF281A10),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, AccentGold),
+                    shadowElevation = 6.dp
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(text = "💡", fontSize = 18.sp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Режим «Размышление»",
+                                fontFamily = FontFamily.Serif,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = AccentGold
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            IconButton(
+                                onClick = {
+                                    showReasoningHint = false
+                                    prefs.edit().putBoolean("has_seen_reasoning_hint", true).apply()
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Закрыть",
+                                    tint = AccentGold.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        Text(
+                            text = "В правом верхнем углу вы можете включить режим «🧠 Размышление» для глубокого богословского рассуждения нейросети (Qwen 1.5B), либо оставить «⚡ Экспресс» для мгновенных ответов.",
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 12.sp,
+                            color = Color(0xFFE2D6C3),
+                            lineHeight = 17.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Button(
+                                onClick = {
+                                    showReasoningHint = false
+                                    prefs.edit().putBoolean("has_seen_reasoning_hint", true).apply()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentGold,
+                                    contentColor = DeepLeather
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Text(
+                                    text = "Понятно",
+                                    fontFamily = FontFamily.Serif,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                items(state.messages, key = { it.id }) { msg ->
+                    ScribeMessageItem(
+                        message = msg,
+                        onLoadMore = viewModel::loadMoreCitations,
+                        onCollapse = viewModel::collapseCitations
+                    )
+                }
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
             }
         }
     }
@@ -512,3 +634,114 @@ fun ScribeScrollCard(citation: NativeSearchResult) {
         }
     }
 }
+
+/**
+ * Диалоговое окно с биографией и описанием Писаря Соломона (Елихорефа)
+ */
+@Composable
+fun ScribeBiographyDialog(onDismiss: () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = DeepLeather,
+            border = androidx.compose.foundation.BorderStroke(2.dp, AccentGold),
+            shadowElevation = 16.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(22.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Большой портрет в золотом кольце
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(CircleShape)
+                        .border(3.dp, AccentGold, CircleShape)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.solomon_scribe),
+                        contentDescription = "Писарь Соломона",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "ЕЛИХОРЕФ",
+                    fontFamily = FontFamily.Serif,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = AccentGold,
+                    letterSpacing = 2.sp
+                )
+
+                Text(
+                    text = "Писарь благословенного царя Соломона",
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 13.sp,
+                    color = Color(0xFFDFD1B8)
+                )
+
+                Surface(
+                    color = Color(0xFF2C1E14),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.5f)),
+                    modifier = Modifier.padding(top = 8.dp, bottom = 14.dp)
+                ) {
+                    Text(
+                        text = "📜 3-я Царств 4:3",
+                        fontFamily = FontFamily.Serif,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = AccentGold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+
+                HorizontalDivider(
+                    color = AccentGold.copy(alpha = 0.3f),
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Text(
+                    text = "«И были у царя Соломона князья: ...Елихореф и Ахия, сыновья Сивы, писцы; Иосафат, сын Ахилуда, дееписатель...»\n— 3-я Царств 4:2-3\n\n" +
+                            "Елихореф (др.-евр. אֱלִיחֹרֶף — «Бог — его награда») — хранитель царской библиотеки и священных свитков при дворе премудрого царя Соломона в Иерусалиме.\n\n" +
+                            "В древнем Израиле писцы почитались наравне с мудрецами: они берегли Закон Моисеев, переписывали притчи Соломона, псалмы Давида и наставляли народ в истине Слова Божьего.\n\n" +
+                            "В этом приложении Писарь служит вашим смиренным проводником: он обращается к 31 102 стихам канонической Библии, находя точные цитаты и делясь вечной мудростью Писания.",
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 13.sp,
+                    color = Color(0xFFE8DEC8),
+                    lineHeight = 20.sp
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AccentGold,
+                        contentColor = DeepLeather
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Во славу Божию",
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+}
+

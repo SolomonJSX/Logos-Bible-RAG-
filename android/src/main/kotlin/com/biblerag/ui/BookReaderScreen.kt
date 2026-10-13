@@ -198,44 +198,6 @@ fun BookReaderScreen(
                 }
             }
         }
-
-        // Шелковая закладка-ленточка (Ляссе), висящая сверху для быстрого возврата к содержанию
-        if (pagerState.currentPage >= 2) {
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = 24.dp)
-                    .offset(y = (-4).dp)
-                    .clickable {
-                        coroutineScope.launch {
-                            pagerState.animateScrollToPage(1)
-                        }
-                    },
-                color = DropCapColor,
-                shadowElevation = 8.dp,
-                shape = RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Bookmark,
-                        contentDescription = "Оглавление",
-                        tint = AccentGold,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Оглавление",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Serif
-                    )
-                }
-            }
-        }
     }
 }
 
