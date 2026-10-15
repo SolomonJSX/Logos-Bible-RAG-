@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -101,6 +102,17 @@ fun SplashScreen(
                     fontWeight = FontWeight.Medium
                 )
             }
+
+            Spacer(Modifier.height(14.dp))
+
+            Text(
+                text = "v0.0.3",
+                color = Color(0xFFC9A265).copy(alpha = 0.65f),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 1.sp
+            )
         }
     }
 }

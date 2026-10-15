@@ -61,3 +61,22 @@ data class ChapterRef(
     val chapter: Int,
     val totalChapters: Int
 )
+
+data class PageVerseSegment(
+    val verse: Int,
+    val text: String,
+    val isContinuation: Boolean = false,
+    val continuesOnNextPage: Boolean = false
+)
+
+data class BookPageRef(
+    val pageNumber: Int,
+    val bookOrder: Int,
+    val bookNameRu: String,
+    val chapter: Int,
+    val totalChaptersInBook: Int,
+    val startVerse: Int,
+    val endVerse: Int,
+    val isFirstPageOfChapter: Boolean,
+    val segments: List<PageVerseSegment> = emptyList()
+)

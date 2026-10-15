@@ -27,12 +27,14 @@ import com.biblerag.engine.MemoryManager
 import com.biblerag.engine.ScriptureSynthesizer
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -130,11 +132,19 @@ class MainActivity : ComponentActivity() {
         val readerRepo = BibleReaderRepository(dbFile.absolutePath)
 
         setContent {
-            MaterialTheme {
+            com.biblerag.ui.theme.LogosTheme {
                 var showSplash by remember { mutableStateOf(true) }
                 // 0 - Книги Писания, 1 - ИИ-Чат
                 var currentTab by remember { mutableStateOf(0) }
+                var targetLocationToOpen by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
                 val books = remember { readerRepo.getBooks() }
+
+                // Фоновый прогрев страниц книги во время показа заставки SplashScreen
+                LaunchedEffect(books) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        readerRepo.getAllPages(books)
+                    }
+                }
 
                 Crossfade(
                     targetState = showSplash,
@@ -185,10 +195,29 @@ class MainActivity : ComponentActivity() {
                                 if (currentTab == 0) {
                                     BookReaderScreen(
                                         repository = readerRepo,
-                                        books = books
+                                        books = books,
+                                        targetLocation = targetLocationToOpen,
+                                        onTargetLocationConsumed = { targetLocationToOpen = null }
                                     )
                                 } else {
-                                    BibleChatScreen(viewModel = viewModel)
+                                    BibleChatScreen(
+                                        viewModel = viewModel,
+                                        onOpenScripture = { canonicalRef ->
+                                            val parsed = parseCanonicalRef(canonicalRef)
+                                            if (parsed != null) {
+                                                val (bookName, chapter, verse) = parsed
+                                                val matchedBook = books.firstOrNull {
+                                                    it.nameRu.equals(bookName, ignoreCase = true) ||
+                                                    it.nameRu.startsWith(bookName, ignoreCase = true) ||
+                                                    bookName.startsWith(it.nameRu, ignoreCase = true)
+                                                }
+                                                if (matchedBook != null) {
+                                                    targetLocationToOpen = Triple(matchedBook.bookOrder, chapter, verse)
+                                                    currentTab = 0
+                                                }
+                                            }
+                                        }
+                                    )
                                 }
                             }
                         }
@@ -196,6 +225,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun parseCanonicalRef(canonicalRef: String): Triple<String, Int, Int>? {
+        // Примеры: "Второзаконие 23:25", "Иисус Навин 15:37-40", "Бытие 1:1", "Псалтирь 22"
+        val regex = Regex("""^(.*?)\s+(\d+)(?::(\d+)(?:-\d+)?)?""")
+        val match = regex.find(canonicalRef.trim()) ?: return null
+        val bookName = match.groupValues[1].trim()
+        val chapter = match.groupValues[2].toIntOrNull() ?: 1
+        val verse = match.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() }?.toIntOrNull() ?: 1
+        return Triple(bookName, chapter, verse)
     }
 
     private fun cleanQueryForEmbedding(raw: String): String {

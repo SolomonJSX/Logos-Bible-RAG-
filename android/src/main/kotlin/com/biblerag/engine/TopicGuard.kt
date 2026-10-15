@@ -60,6 +60,14 @@ object TopicGuard {
         "привет", "здравствуй", "добрый день", "доброе утро", "добрый вечер", "мир тебе", "хай", "салам"
     )
 
+    private val GIBBERISH_REFUSAL = """
+        Мир дому твоему, путник.
+        
+        Слова сии неясны мне и подобны суетному шуму. Я — царский писец царя Соломона, хранитель священных свитков.
+        
+        Задай свой вопрос о Священном Писании, Боге, вере, молитве или смысле жизни понятными словами, и я с радостью отыщу для тебя слова мудрости в древних свитках.
+    """.trimIndent()
+
     /**
      * Проверяет валидность запроса ДО запуска embedding и поиска по базе.
      */
@@ -77,12 +85,17 @@ object TopicGuard {
             return TopicCheckResult.Refusal(SHORT_GIBBERISH_REFUSAL)
         }
 
-        // 3. Простое приветствие без вопроса
+        // 3. Проверка на абракадабру, случайный набор клавиш и бессмысленные слова (например "ddghh", "asdfgh")
+        if (isGibberish(q) && !hasBiblicalAnchor(q)) {
+            return TopicCheckResult.Refusal(GIBBERISH_REFUSAL)
+        }
+
+        // 4. Простое приветствие без вопроса
         if (GREETING_WORDS.any { q == it || q.startsWith("$it ") && q.length < 15 }) {
             return TopicCheckResult.Refusal(GREETING_REPLY)
         }
 
-        // 4. Проверка на явные мирские/технические стоп-слова
+        // 5. Проверка на явные мирские/технические стоп-слова
         for (stopWord in SECULAR_STOP_WORDS) {
             if (q.contains(stopWord) && !hasBiblicalAnchor(q)) {
                 return TopicCheckResult.Refusal(SCRIBE_REFUSAL_MESSAGE)
@@ -91,6 +104,53 @@ object TopicGuard {
 
         // Запрос допущен к embedding и исследованию Писания
         return TopicCheckResult.Allowed
+    }
+
+    /**
+     * Выявляет случайные нажатия клавиш, отсутствие гласных, скопления согласных и абракадабру.
+     */
+    private fun isGibberish(text: String): Boolean {
+        val clean = text.lowercase().trim()
+        val words = clean.split(Regex("""[\s\p{Punct}]+""")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) return true
+
+        val ruVowels = setOf('а', 'е', 'ё', 'и', 'о', 'у', 'ы', 'э', 'ю', 'я')
+        val enVowels = setOf('a', 'e', 'i', 'o', 'u', 'y')
+
+        for (word in words) {
+            if (word.length >= 3) {
+                val hasRu = word.any { it in 'а'..'я' || it == 'ё' }
+                val hasEn = word.any { it in 'a'..'z' }
+
+                val ruVowelCount = word.count { it in ruVowels }
+                val enVowelCount = word.count { it in enVowels }
+
+                // Если в слове от 3 букв вообще нет гласных — это абракадабра (например: ddghh, qwrt, ждлп)
+                if (hasRu && ruVowelCount == 0) return true
+                if (hasEn && enVowelCount == 0) return true
+
+                // Если 3+ одинаковых символа подряд (например: аааа, ddddd)
+                if (Regex("""(.)\1{2,}""").containsMatchIn(word)) return true
+
+                // Чрезмерное скопление согласных подряд (например 5+ согласных подряд)
+                if (Regex("""[bcdfghjklmnpqrstvwxz]{5,}""").containsMatchIn(word)) return true
+                if (Regex("""[бвгджзйклмнпрстфхцчшщ]{5,}""").containsMatchIn(word)) return true
+            }
+        }
+
+        // Если запрос целиком из латиницы, но не содержит известных библейских/философских корней
+        val allLetters = clean.filter { it.isLetter() }
+        if (allLetters.isNotEmpty() && allLetters.all { it in 'a'..'z' }) {
+            val recognizedEn = listOf(
+                "god", "jesus", "christ", "bible", "faith", "love", "prayer",
+                "lord", "sin", "hope", "soul", "wisdom", "peace", "truth", "life",
+                "holy", "spirit", "grace", "salvation", "gospel", "psalm"
+            )
+            val hasRecognized = recognizedEn.any { clean.contains(it) }
+            if (!hasRecognized) return true
+        }
+
+        return false
     }
 
     private fun hasBiblicalAnchor(q: String): Boolean {

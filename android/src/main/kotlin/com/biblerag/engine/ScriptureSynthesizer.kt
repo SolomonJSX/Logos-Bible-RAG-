@@ -23,7 +23,7 @@ object ScriptureSynthesizer {
                 "Мир дому твоему, путник. В священных свитках Синодального перевода, открытых ныне предо мною, не найдено прямых стихов по твоему вопросу.\n\n" +
                 "Попробуй вопросить иначе или использовать святые слова Писания: «вера», «молитва», «заповеди», «любовь», «прощение» или «мудрость»."
             }
-            streamWords(emptyMsg, onToken, 20)
+            streamWords(emptyMsg, onToken, 40)
             return
         }
 
@@ -31,15 +31,15 @@ object ScriptureSynthesizer {
 
         // 1. Формирование смыслового введения, отвечающего прямо на вопрос
         val intro = buildThematicIntroduction(q, chunks)
-        streamWords(intro + "\n\n", onToken, 18)
+        streamWords(intro + "\n\n", onToken, 40)
 
         // 2. Развернутый анализ каждого найденного отрывка
         val body = buildPassagesExposition(q, chunks)
-        streamWords(body + "\n\n", onToken, 16)
+        streamWords(body + "\n\n", onToken, 38)
 
         // 3. Духовное заключение и наставление
         val conclusion = buildConclusion(q, chunks)
-        streamWords(conclusion, onToken, 18)
+        streamWords(conclusion, onToken, 40)
     }
 
     private suspend fun streamWords(text: String, onToken: suspend (String) -> Unit, delayMs: Long) {
@@ -57,6 +57,7 @@ object ScriptureSynthesizer {
             }
             if (lineIdx < lines.lastIndex) {
                 onToken("\n")
+                delay(120L) // Небольшая естественная пауза между абзацами
             }
         }
     }

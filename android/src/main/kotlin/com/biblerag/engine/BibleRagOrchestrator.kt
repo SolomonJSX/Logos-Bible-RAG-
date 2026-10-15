@@ -54,7 +54,7 @@ class BibleRagOrchestrator(
                 words.forEachIndexed { idx, word ->
                     val suffix = if (idx < words.lastIndex) " " else ""
                     send(RagStreamEvent.TokenGenerated(word + suffix))
-                    kotlinx.coroutines.delay(18)
+                    kotlinx.coroutines.delay(40)
                 }
                 send(RagStreamEvent.Completed(words.size, System.currentTimeMillis() - startTime))
                 return@channelFlow

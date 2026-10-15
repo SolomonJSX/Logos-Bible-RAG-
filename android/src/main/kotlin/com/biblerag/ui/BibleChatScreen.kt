@@ -3,6 +3,9 @@ package com.biblerag.ui
 import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,26 +44,26 @@ import androidx.compose.ui.window.Dialog
 import com.biblerag.R
 import com.biblerag.core.NativeSearchResult
 
-// Благородная антикварная палитра для диалога с Писарем
-private val ChatBg = Color(0xFFF6F1E6)
-private val DeepLeather = Color(0xFF1B1109)
-private val AccentGold = Color(0xFFC5A059)
-private val InkDark = Color(0xFF281E15)
-private val InkGold = Color(0xFF9E782F)
-private val ParchmentCard = Color(0xFFF1E9DA)
-private val AssistantBubble = Color(0xFFFAF6EE)
-private val UserBubble = Color(0xFF2B1C12)
+import com.biblerag.ui.theme.LocalLogosColors
+
+// Благородная антикварная палитра для диалога с Писарем с поддержкой ночного режима
+private val ChatBg: Color @Composable get() = LocalLogosColors.current.chatBg
+private val DeepLeather: Color @Composable get() = LocalLogosColors.current.deepLeather
+private val AccentGold: Color @Composable get() = LocalLogosColors.current.accentGold
+private val InkDark: Color @Composable get() = LocalLogosColors.current.inkDark
+private val InkGold: Color @Composable get() = LocalLogosColors.current.inkGold
+private val ParchmentCard: Color @Composable get() = LocalLogosColors.current.parchmentCard
+private val AssistantBubble: Color @Composable get() = LocalLogosColors.current.assistantBubble
+private val UserBubble: Color @Composable get() = LocalLogosColors.current.userBubble
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BibleChatScreen(viewModel: ChatViewModel) {
+fun BibleChatScreen(
+    viewModel: ChatViewModel,
+    onOpenScripture: (String) -> Unit = {}
+) {
     val state by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("logos_chat_prefs", Context.MODE_PRIVATE) }
-    var showReasoningHint by remember {
-        mutableStateOf(!prefs.getBoolean("has_seen_reasoning_hint", false))
-    }
     var showScribeBio by remember { mutableStateOf(false) }
 
     // Автоскролл к самому низу при генерации контента, новых сообщениях или раскрытии цитат
@@ -84,7 +87,7 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
     }
 
     if (showScribeBio) {
-        ScribeBiographyDialog(onDismiss = { showScribeBio = false })
+        ScribeBiographySheet(onDismiss = { showScribeBio = false })
     }
 
     Scaffold(
@@ -96,12 +99,12 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { showScribeBio = true }
-                            .padding(vertical = 4.dp, horizontal = 2.dp)
+                            .padding(vertical = 2.dp, horizontal = 2.dp)
                     ) {
                         // Портрет Писаря Соломона в золотом медальоне
                         Box(
                             modifier = Modifier
-                                .size(46.dp)
+                                .size(38.dp)
                                 .clip(CircleShape)
                                 .border(2.dp, AccentGold, CircleShape)
                         ) {
@@ -113,50 +116,28 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                             )
                         }
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(10.dp))
 
                         Column {
                             Text(
                                 text = "Писарь Соломона",
                                 fontFamily = FontFamily.Serif,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
+                                fontSize = 16.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 color = AccentGold
                             )
                             Text(
                                 text = "Хранитель свитков • Офлайн ИИ",
                                 fontFamily = FontFamily.Serif,
                                 fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                                 color = Color(0xFFD4C3A3)
                             )
                         }
                     }
-                },
-                actions = {
-                    // Переключатель режима размышления (вместо технического имени Qwen)
-                    FilterChip(
-                        selected = state.useNeuralLlm,
-                        onClick = { viewModel.setNeuralLlmEnabled(!state.useNeuralLlm) },
-                        label = {
-                            Text(
-                                text = if (state.useNeuralLlm) "🧠 Размышление" else "⚡ Экспресс",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (state.useNeuralLlm) DeepLeather else AccentGold
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AccentGold,
-                            containerColor = DeepLeather.copy(alpha = 0.5f)
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = state.useNeuralLlm,
-                            borderColor = AccentGold
-                        ),
-                        modifier = Modifier.padding(end = 12.dp)
-                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = DeepLeather
@@ -211,7 +192,7 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                             Text(
                                 "Вопрошай у писца о Писании...",
                                 fontFamily = FontFamily.Serif,
-                                color = Color(0xFF8F7A65),
+                                color = LocalLogosColors.current.placeholderColor,
                                 fontSize = 14.sp
                             )
                         },
@@ -220,11 +201,11 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                         maxLines = 3,
                         enabled = !state.isGenerating,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = ChatBg,
-                            unfocusedContainerColor = ChatBg,
-                            disabledContainerColor = ChatBg.copy(alpha = 0.6f),
-                            focusedTextColor = InkDark,
-                            unfocusedTextColor = InkDark,
+                            focusedContainerColor = LocalLogosColors.current.inputContainerBg,
+                            unfocusedContainerColor = LocalLogosColors.current.inputContainerBg,
+                            disabledContainerColor = LocalLogosColors.current.inputContainerBg.copy(alpha = 0.6f),
+                            focusedTextColor = LocalLogosColors.current.inputTextColor,
+                            unfocusedTextColor = LocalLogosColors.current.inputTextColor,
                             focusedBorderColor = AccentGold,
                             unfocusedBorderColor = AccentGold.copy(alpha = 0.5f),
                             cursorColor = InkGold
@@ -270,85 +251,6 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                 .background(ChatBg)
                 .padding(innerPadding)
         ) {
-            // Подсказка при первом открытии о переключении в режим «Размышление»
-            AnimatedVisibility(visible = showReasoningHint) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    color = Color(0xFF281A10),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.5.dp, AccentGold),
-                    shadowElevation = 6.dp
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "💡", fontSize = 18.sp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Режим «Размышление»",
-                                fontFamily = FontFamily.Serif,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = AccentGold
-                            )
-                            Spacer(modifier = Modifier.weight(1f))
-                            IconButton(
-                                onClick = {
-                                    showReasoningHint = false
-                                    prefs.edit().putBoolean("has_seen_reasoning_hint", true).apply()
-                                },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Закрыть",
-                                    tint = AccentGold.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = "В правом верхнем углу вы можете включить режим «🧠 Размышление» для глубокого богословского рассуждения нейросети (Qwen 1.5B), либо оставить «⚡ Экспресс» для мгновенных ответов.",
-                            fontFamily = FontFamily.Serif,
-                            fontSize = 12.sp,
-                            color = Color(0xFFE2D6C3),
-                            lineHeight = 17.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Button(
-                                onClick = {
-                                    showReasoningHint = false
-                                    prefs.edit().putBoolean("has_seen_reasoning_hint", true).apply()
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentGold,
-                                    contentColor = DeepLeather
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Text(
-                                    text = "Понятно",
-                                    fontFamily = FontFamily.Serif,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                        }
-                    }
-                }
-            }
 
             LazyColumn(
                 state = listState,
@@ -362,7 +264,8 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
                     ScribeMessageItem(
                         message = msg,
                         onLoadMore = viewModel::loadMoreCitations,
-                        onCollapse = viewModel::collapseCitations
+                        onCollapse = viewModel::collapseCitations,
+                        onOpenScripture = onOpenScripture
                     )
                 }
                 item {
@@ -377,7 +280,8 @@ fun BibleChatScreen(viewModel: ChatViewModel) {
 fun ScribeMessageItem(
     message: Message,
     onLoadMore: (String) -> Unit = {},
-    onCollapse: (String) -> Unit = {}
+    onCollapse: (String) -> Unit = {},
+    onOpenScripture: (String) -> Unit = {}
 ) {
     val isUser = message.sender == Sender.USER
 
@@ -444,108 +348,116 @@ fun ScribeMessageItem(
             }
         }
 
-        // Блок найденных контекстных стихов: показываем ТОЛЬКО когда ответ готов или начал выводиться
-        if (message.citations.isNotEmpty() && message.text.isNotEmpty()) {
-            val totalCount = message.citations.size
-            val visibleCount = message.visibleCitationCount.coerceAtMost(totalCount)
-            val visibleCitations = message.citations.take(visibleCount)
+        // Блок найденных контекстных стихов: выходит ТОЛЬКО после того, как полностью завершится печать текста (!message.isStreaming)
+        AnimatedVisibility(
+            visible = !message.isStreaming && message.citations.isNotEmpty() && message.text.isNotEmpty(),
+            enter = fadeIn(tween(500)) + expandVertically(tween(500))
+        ) {
+            Column {
+                val totalCount = message.citations.size
+                val visibleCount = message.visibleCitationCount.coerceAtMost(totalCount)
+                val visibleCitations = message.citations.take(visibleCount)
 
-            Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(8.dp))
 
-            // Заголовок блока свитков
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 4.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoAwesome,
-                    contentDescription = null,
-                    tint = InkGold,
-                    modifier = Modifier.size(14.dp)
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = "Свитки Писания: показано $visibleCount из $totalCount",
-                    fontFamily = FontFamily.Serif,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 12.sp,
-                    color = InkGold
-                )
-                message.searchTimeMs?.let {
-                    Text(
-                        text = " • ${it}мс",
-                        fontSize = 11.sp,
-                        color = Color(0xFF8F7A65)
+                // Заголовок блока свитков
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = InkGold,
+                        modifier = Modifier.size(14.dp)
                     )
-                }
-            }
-
-            Spacer(Modifier.height(6.dp))
-
-            // Карточки стихов
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateContentSize(),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                visibleCitations.forEach { citation ->
-                    ScribeScrollCard(citation = citation)
-                }
-            }
-
-            // Кнопки пагинации: «Показать ещё 3» и «Свернуть до 3»
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (totalCount > visibleCount) {
-                    val remaining = totalCount - visibleCount
-                    val nextStep = remaining.coerceAtMost(3)
-                    OutlinedButton(
-                        onClick = { onLoadMore(message.id) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = InkDark),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ExpandMore,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = InkGold
-                        )
-                        Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Свитки Писания: показано $visibleCount из $totalCount",
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp,
+                        color = InkGold
+                    )
+                    message.searchTimeMs?.let {
                         Text(
-                            text = "Ещё $nextStep (из $remaining)",
-                            fontFamily = FontFamily.Serif,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = " • ${it}мс",
+                            fontSize = 11.sp,
+                            color = Color(0xFF8F7A65)
                         )
                     }
                 }
 
-                if (visibleCount > 3) {
-                    OutlinedButton(
-                        onClick = { onCollapse(message.id) },
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = InkDark),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, InkGold.copy(alpha = 0.5f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ExpandLess,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = InkGold
+                Spacer(Modifier.height(6.dp))
+
+                // Карточки стихов с ссылками на главы Библии
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    visibleCitations.forEach { citation ->
+                        ScribeScrollCard(
+                            citation = citation,
+                            onOpenScripture = onOpenScripture
                         )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = "Свернуть",
-                            fontFamily = FontFamily.Serif,
-                            fontSize = 12.sp
-                        )
+                    }
+                }
+
+                // Кнопки пагинации: «Показать ещё 3» и «Свернуть до 3»
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (totalCount > visibleCount) {
+                        val remaining = totalCount - visibleCount
+                        val nextStep = remaining.coerceAtMost(3)
+                        OutlinedButton(
+                            onClick = { onLoadMore(message.id) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = InkDark),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = InkGold
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Ещё $nextStep (из $remaining)",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    if (visibleCount > 3) {
+                        OutlinedButton(
+                            onClick = { onCollapse(message.id) },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = InkDark),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, InkGold.copy(alpha = 0.5f))
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ExpandLess,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = InkGold
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = "Свернуть",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 12.sp
+                            )
+                        }
                     }
                 }
             }
@@ -554,10 +466,13 @@ fun ScribeMessageItem(
 }
 
 /**
- * Карточка-свиток найденного отрывка Писания
+ * Карточка-свиток найденного отрывка Писания со ссылкой на книгу
  */
 @Composable
-fun ScribeScrollCard(citation: NativeSearchResult) {
+fun ScribeScrollCard(
+    citation: NativeSearchResult,
+    onOpenScripture: (String) -> Unit = {}
+) {
     var expanded by remember { mutableStateOf(false) }
 
     Card(
@@ -595,6 +510,29 @@ fun ScribeScrollCard(citation: NativeSearchResult) {
                     )
                 }
 
+                // Ссылка-бейдж для быстрого перехода к чтению главы в ридере
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = AccentGold.copy(alpha = 0.18f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.6f)),
+                    modifier = Modifier.clickable { onOpenScripture(citation.canonicalRef) }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Читать ↗",
+                            fontFamily = FontFamily.Serif,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = InkDark
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(6.dp))
+
                 Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = DeepLeather.copy(alpha = 0.08f)
@@ -631,115 +569,175 @@ fun ScribeScrollCard(citation: NativeSearchResult) {
                 maxLines = if (expanded) Int.MAX_VALUE else 2,
                 overflow = TextOverflow.Ellipsis
             )
+
+            // Развернутая кнопка перехода при открытой карточке
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { onOpenScripture(citation.canonicalRef) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = DeepLeather,
+                        contentColor = AccentGold
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(vertical = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MenuBook,
+                        contentDescription = null,
+                        tint = AccentGold,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Открыть главу в книге Logos",
+                        fontFamily = FontFamily.Serif,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+            }
         }
     }
 }
 
 /**
- * Диалоговое окно с биографией и описанием Писаря Соломона (Елихорефа)
+ * Роскошная нижняя шторка (ModalBottomSheet) с биографией и описанием Писаря Соломона (Елихорефа)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScribeBiographyDialog(onDismiss: () -> Unit) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = DeepLeather,
-            border = androidx.compose.foundation.BorderStroke(2.dp, AccentGold),
-            shadowElevation = 16.dp,
+fun ScribeBiographySheet(onDismiss: () -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = DeepLeather,
+        contentColor = Color(0xFFE8DEC8),
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(color = AccentGold.copy(alpha = 0.5f))
+        },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(vertical = 16.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
+            // Большой портрет в золотом кольце
+            Box(
                 modifier = Modifier
-                    .padding(22.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .size(96.dp)
+                    .clip(CircleShape)
+                    .border(3.dp, AccentGold, CircleShape)
             ) {
-                // Большой портрет в золотом кольце
-                Box(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .clip(CircleShape)
-                        .border(3.dp, AccentGold, CircleShape)
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.solomon_scribe),
-                        contentDescription = "Писарь Соломона",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                Image(
+                    painter = painterResource(id = R.drawable.solomon_scribe),
+                    contentDescription = "Писарь Соломона",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
-                Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
+            Text(
+                text = "ЕЛИХОРЕФ",
+                fontFamily = FontFamily.Serif,
+                fontWeight = FontWeight.Bold,
+                fontSize = 22.sp,
+                color = AccentGold,
+                letterSpacing = 2.sp
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = "Писарь благословенного царя Соломона",
+                fontFamily = FontFamily.Serif,
+                fontSize = 14.sp,
+                color = Color(0xFFDFD1B8)
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Surface(
+                color = Color(0xFF2C1E14),
+                shape = RoundedCornerShape(12.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.5f))
+            ) {
                 Text(
-                    text = "ЕЛИХОРЕФ",
+                    text = "📜 3-я Царств 4:3",
+                    fontFamily = FontFamily.Serif,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = AccentGold,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            HorizontalDivider(
+                color = AccentGold.copy(alpha = 0.3f),
+                thickness = 1.dp
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                color = Color(0x22C5A059),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.25f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "«И были у царя Соломона князья: ...Елихореф и Ахия, сыновья Сивы, писцы; Иосафат, сын Ахилуда, дееписатель...»\n— 3-я Царств 4:2–3",
+                    fontFamily = FontFamily.Serif,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = Color(0xFFF1E6D2),
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "Елихореф (др.-евр. אֱלִיחֹרֶף — «Бог — его награда») — хранитель царской библиотеки и священных свитков при дворе премудрого царя Соломона в Иерусалиме.\n\n" +
+                        "В древнем Израиле писцы почитались наравне с мудрецами: они берегли Закон Моисеев, переписывали притчи Соломона, псалмы Давида и наставляли народ в истине Слова Божьего.\n\n" +
+                        "В этом приложении Писарь служит вашим смиренным проводником: он обращается к 31 102 стихам канонической Библии, находя точные цитаты и делясь вечной мудростью Писания.",
+                fontFamily = FontFamily.Serif,
+                fontSize = 14.sp,
+                color = Color(0xFFE8DEC8),
+                lineHeight = 22.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Start
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AccentGold,
+                    contentColor = DeepLeather
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+            ) {
+                Text(
+                    text = "Во славу Божию",
                     fontFamily = FontFamily.Serif,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp,
-                    color = AccentGold,
-                    letterSpacing = 2.sp
+                    fontSize = 15.sp
                 )
-
-                Text(
-                    text = "Писарь благословенного царя Соломона",
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 13.sp,
-                    color = Color(0xFFDFD1B8)
-                )
-
-                Surface(
-                    color = Color(0xFF2C1E14),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, AccentGold.copy(alpha = 0.5f)),
-                    modifier = Modifier.padding(top = 8.dp, bottom = 14.dp)
-                ) {
-                    Text(
-                        text = "📜 3-я Царств 4:3",
-                        fontFamily = FontFamily.Serif,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = AccentGold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-
-                HorizontalDivider(
-                    color = AccentGold.copy(alpha = 0.3f),
-                    thickness = 1.dp,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-
-                Text(
-                    text = "«И были у царя Соломона князья: ...Елихореф и Ахия, сыновья Сивы, писцы; Иосафат, сын Ахилуда, дееписатель...»\n— 3-я Царств 4:2-3\n\n" +
-                            "Елихореф (др.-евр. אֱלִיחֹרֶף — «Бог — его награда») — хранитель царской библиотеки и священных свитков при дворе премудрого царя Соломона в Иерусалиме.\n\n" +
-                            "В древнем Израиле писцы почитались наравне с мудрецами: они берегли Закон Моисеев, переписывали притчи Соломона, псалмы Давида и наставляли народ в истине Слова Божьего.\n\n" +
-                            "В этом приложении Писарь служит вашим смиренным проводником: он обращается к 31 102 стихам канонической Библии, находя точные цитаты и делясь вечной мудростью Писания.",
-                    fontFamily = FontFamily.Serif,
-                    fontSize = 13.sp,
-                    color = Color(0xFFE8DEC8),
-                    lineHeight = 20.sp
-                )
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentGold,
-                        contentColor = DeepLeather
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Во славу Божию",
-                        fontFamily = FontFamily.Serif,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                }
             }
         }
     }

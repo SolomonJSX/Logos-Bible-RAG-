@@ -51,31 +51,36 @@ import androidx.compose.ui.unit.sp
 import com.biblerag.R
 import com.biblerag.data.BibleReaderRepository
 import com.biblerag.model.BookItem
+import com.biblerag.model.BookPageRef
 import com.biblerag.model.ChapterRef
 import com.biblerag.model.VerseItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Цветовая палитра антикварной книги Logos
-private val ParchmentBg = Color(0xFFF9F5EC)
-private val ParchmentDarker = Color(0xFFF1E9DA)
-private val InkDark = Color(0xFF2C2219)
-private val InkGold = Color(0xFF9E782F)
-private val AccentGold = Color(0xFFC5A059)
-private val DeepLeather = Color(0xFF1B1109)
-private val DropCapColor = Color(0xFF8B1E0F) // Винтажный киноварь для буквицы
+import com.biblerag.ui.theme.LocalLogosColors
+
+// Цветовая палитра антикварной книги Logos с адаптацией к ночному режиму
+private val ParchmentBg: Color @Composable get() = LocalLogosColors.current.pageBg
+private val ParchmentDarker: Color @Composable get() = LocalLogosColors.current.pageBgDarker
+private val InkDark: Color @Composable get() = LocalLogosColors.current.inkDark
+private val InkGold: Color @Composable get() = LocalLogosColors.current.inkGold
+private val AccentGold: Color @Composable get() = LocalLogosColors.current.accentGold
+private val DeepLeather: Color @Composable get() = LocalLogosColors.current.deepLeather
+private val DropCapColor: Color @Composable get() = LocalLogosColors.current.dropCapColor
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun BookReaderScreen(
     repository: BibleReaderRepository,
     books: List<BookItem>,
+    targetLocation: Triple<Int, Int, Int>? = null, // bookOrder, chapter, verse
+    onTargetLocationConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val allChapters = remember(books) { repository.getAllChapters(books) }
+    val allPages = remember(books) { repository.getAllPages(books) }
 
     // Запоминание страницы, на которой остановились
     val prefs = remember { context.getSharedPreferences("logos_reader_prefs", Context.MODE_PRIVATE) }
@@ -83,16 +88,33 @@ fun BookReaderScreen(
 
     // Страница 0 = Обложка
     // Страница 1 = Оглавление
-    // Страница 2..N = Главы Библии (страница книги 1 = index 2)
-    val totalPages = 2 + allChapters.size
+    // Страницы 2..N = Реальные страницы книги без скролла (страница книги 1 = index 2)
+    val totalPages = 2 + allPages.size
     val pagerState = rememberPagerState(
-        initialPage = savedPage.coerceIn(0, totalPages - 1),
+        initialPage = savedPage.coerceIn(0, (totalPages - 1).coerceAtLeast(0)),
         pageCount = { totalPages }
     )
 
     // Автосохранение страницы при перелистывании
     LaunchedEffect(pagerState.currentPage) {
         prefs.edit().putInt("last_read_page", pagerState.currentPage).apply()
+    }
+
+    // Мгновенный переход к точной странице со стихом по ссылке из цитат диалога Писаря
+    LaunchedEffect(targetLocation, allPages) {
+        targetLocation?.let { (bookOrder, chapter, verse) ->
+            val pageIdx = allPages.indexOfFirst {
+                it.bookOrder == bookOrder && it.chapter == chapter && verse in it.startVerse..it.endVerse
+            }.let { idx ->
+                if (idx >= 0) idx else allPages.indexOfFirst { it.bookOrder == bookOrder && it.chapter == chapter }
+            }
+
+            if (pageIdx >= 0) {
+                val pageToOpen = 2 + pageIdx
+                pagerState.scrollToPage(pageToOpen)
+                onTargetLocationConsumed()
+            }
+        }
     }
 
     Box(
@@ -130,28 +152,27 @@ fun BookReaderScreen(
                         // Страница 1: Оглавление книги (Содержание в книжном стиле)
                         BookTableOfContentsPage(
                             books = books,
-                            allChapters = allChapters,
+                            allPages = allPages,
                             onChapterSelected = { bookOrder, chapter ->
-                                val targetIdx = allChapters.indexOfFirst {
+                                val targetPage = allPages.firstOrNull {
                                     it.bookOrder == bookOrder && it.chapter == chapter
                                 }
-                                if (targetIdx >= 0) {
+                                if (targetPage != null) {
                                     coroutineScope.launch {
-                                        pagerState.animateScrollToPage(2 + targetIdx)
+                                        pagerState.animateScrollToPage(2 + (targetPage.pageNumber - 1))
                                     }
                                 }
                             }
                         )
                     }
                     else -> {
-                        // Страницы 2+: Главы Писания (страница 1 книги = index 2)
-                        val chapterIdx = pageIndex - 2
-                        if (chapterIdx in allChapters.indices) {
-                            val chapterRef = allChapters[chapterIdx]
+                        // Страницы 2+: Настоящие печатные страницы Писания без вертикального скролла
+                        val pageIdxInAllPages = pageIndex - 2
+                        if (pageIdxInAllPages in allPages.indices) {
+                            val pageRef = allPages[pageIdxInAllPages]
                             BookChapterPage(
                                 repository = repository,
-                                chapterRef = chapterRef,
-                                bookPageNumber = chapterIdx + 1,
+                                pageRef = pageRef,
                                 onBackToContents = {
                                     coroutineScope.launch {
                                         pagerState.animateScrollToPage(1)
@@ -396,7 +417,7 @@ private fun BookCoverPage(
 @Composable
 private fun BookTableOfContentsPage(
     books: List<BookItem>,
-    allChapters: List<ChapterRef>,
+    allPages: List<BookPageRef>,
     onChapterSelected: (bookOrder: Int, chapter: Int) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -417,11 +438,6 @@ private fun BookTableOfContentsPage(
         else newTestamentBooks.filter { it.nameRu.contains(searchQuery, ignoreCase = true) }
     }
 
-    val newTestamentStartPage = remember(allChapters) {
-        val matthewOrder = 40
-        val idx = allChapters.indexOfFirst { it.bookOrder >= matthewOrder }
-        if (idx >= 0) idx + 1 else 930
-    }
 
     Box(
         modifier = Modifier
@@ -464,7 +480,7 @@ private fun BookTableOfContentsPage(
                 placeholder = {
                     Text(
                         "Поиск книги в оглавлении...",
-                        color = Color(0xFF7A6B5D),
+                        color = LocalLogosColors.current.placeholderColor,
                         fontFamily = FontFamily.Serif
                     )
                 },
@@ -483,6 +499,8 @@ private fun BookTableOfContentsPage(
                     }
                 },
                 colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = LocalLogosColors.current.pageBgDarker,
+                    unfocusedContainerColor = LocalLogosColors.current.pageBgDarker,
                     focusedBorderColor = InkGold,
                     unfocusedBorderColor = InkGold.copy(alpha = 0.4f),
                     focusedTextColor = InkDark,
@@ -505,7 +523,6 @@ private fun BookTableOfContentsPage(
                     item {
                         TestamentHeaderRow(
                             title = "ВЕТХИЙ ЗАВЕТ",
-                            pageText = "1",
                             isExpanded = expandedOldTestament || searchQuery.isNotBlank(),
                             onToggle = { expandedOldTestament = !expandedOldTestament }
                         )
@@ -515,7 +532,7 @@ private fun BookTableOfContentsPage(
                         items(filteredOldBooks, key = { it.bookOrder }) { book ->
                             BookTocRow(
                                 book = book,
-                                allChapters = allChapters,
+                                allPages = allPages,
                                 isExpanded = expandedBookOrder == book.bookOrder,
                                 onToggle = {
                                     expandedBookOrder = if (expandedBookOrder == book.bookOrder) null else book.bookOrder
@@ -535,7 +552,6 @@ private fun BookTableOfContentsPage(
                     item {
                         TestamentHeaderRow(
                             title = "НОВЫЙ ЗАВЕТ",
-                            pageText = "$newTestamentStartPage",
                             isExpanded = expandedNewTestament || searchQuery.isNotBlank(),
                             onToggle = { expandedNewTestament = !expandedNewTestament }
                         )
@@ -545,7 +561,7 @@ private fun BookTableOfContentsPage(
                         items(filteredNewBooks, key = { it.bookOrder }) { book ->
                             BookTocRow(
                                 book = book,
-                                allChapters = allChapters,
+                                allPages = allPages,
                                 isExpanded = expandedBookOrder == book.bookOrder,
                                 onToggle = {
                                     expandedBookOrder = if (expandedBookOrder == book.bookOrder) null else book.bookOrder
@@ -561,40 +577,37 @@ private fun BookTableOfContentsPage(
 }
 
 /**
- * Строка верхнего уровня: Ветхий Завет / Новый Завет
+ * Строка верхнего уровня: Ветхий Завет / Новый Завет в стиле разделов книги (без номеров страниц)
  */
 @Composable
 private fun TestamentHeaderRow(
     title: String,
-    pageText: String,
     isExpanded: Boolean,
     onToggle: () -> Unit
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(vertical = 4.dp),
-        color = DeepLeather,
-        shape = RoundedCornerShape(6.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .clickable(onClick = onToggle)
+                .padding(vertical = 10.dp, horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = AccentGold,
+                color = if (isExpanded) DeepLeather else Color.Transparent,
+                border = androidx.compose.foundation.BorderStroke(
+                    1.dp,
+                    if (isExpanded) AccentGold else InkGold.copy(alpha = 0.6f)
+                ),
                 modifier = Modifier.size(20.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.Remove else Icons.Default.Add,
                         contentDescription = null,
-                        tint = DeepLeather,
-                        modifier = Modifier.size(14.dp)
+                        tint = if (isExpanded) AccentGold else InkDark,
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
@@ -603,33 +616,20 @@ private fun TestamentHeaderRow(
 
             Text(
                 text = title,
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Serif,
-                color = AccentGold,
-                letterSpacing = 1.sp
-            )
-
-            Spacer(modifier = Modifier.width(6.dp))
-
-            Text(
-                text = ". . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .",
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Serif,
-                color = AccentGold.copy(alpha = 0.4f),
-                maxLines = 1,
-                overflow = TextOverflow.Clip,
-                modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
-            )
-
-            Text(
-                text = pageText,
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Serif,
-                fontWeight = FontWeight.Bold,
-                color = AccentGold
+                color = InkDark,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier.weight(1f)
             )
         }
+
+        HorizontalDivider(
+            color = InkGold.copy(alpha = 0.35f),
+            thickness = 1.dp,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
     }
 }
 
@@ -639,14 +639,13 @@ private fun TestamentHeaderRow(
 @Composable
 private fun BookTocRow(
     book: BookItem,
-    allChapters: List<ChapterRef>,
+    allPages: List<BookPageRef>,
     isExpanded: Boolean,
     onToggle: () -> Unit,
     onChapterSelected: (bookOrder: Int, chapter: Int) -> Unit
 ) {
-    val bookStartPage = remember(book, allChapters) {
-        val idx = allChapters.indexOfFirst { it.bookOrder == book.bookOrder }
-        if (idx >= 0) idx + 1 else 1
+    val bookStartPage = remember(book, allPages) {
+        allPages.firstOrNull { it.bookOrder == book.bookOrder }?.pageNumber ?: 1
     }
 
     Column(
@@ -720,9 +719,9 @@ private fun BookTocRow(
                     .padding(start = 24.dp, end = 4.dp, top = 2.dp, bottom = 8.dp)
             ) {
                 for (ch in 1..book.totalChapters) {
-                    val chPage = remember(book.bookOrder, ch, allChapters) {
-                        val idx = allChapters.indexOfFirst { it.bookOrder == book.bookOrder && it.chapter == ch }
-                        if (idx >= 0) idx + 1 else bookStartPage + ch - 1
+                    val chPage = remember(book.bookOrder, ch, allPages) {
+                        allPages.firstOrNull { it.bookOrder == book.bookOrder && it.chapter == ch }?.pageNumber
+                            ?: (bookStartPage + ch - 1)
                     }
 
                     Row(
@@ -770,26 +769,25 @@ private fun BookTocRow(
 }
 
 /**
- * Страницы 2+: Страница чтения главы из Библии
+ * Страницы 2+: Страница чтения стихов Писания без вертикального скролла
  */
 @Composable
 private fun BookChapterPage(
     repository: BibleReaderRepository,
-    chapterRef: ChapterRef,
-    bookPageNumber: Int,
+    pageRef: BookPageRef,
     onBackToContents: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     hasPrevious: Boolean,
     hasNext: Boolean
 ) {
-    val versesState = produceState<List<VerseItem>?>(initialValue = null, chapterRef) {
-        value = withContext(Dispatchers.IO) {
-            repository.getChapterVerses(chapterRef.bookOrder, chapterRef.chapter)
+    val segments = pageRef.segments.ifEmpty {
+        remember(pageRef) {
+            repository.getPageVerses(pageRef.bookOrder, pageRef.chapter, pageRef.startVerse, pageRef.endVerse).map {
+                com.biblerag.model.PageVerseSegment(verse = it.verse, text = it.text)
+            }
         }
     }
-    val verses = versesState.value
-    val scrollState = rememberScrollState()
 
     Box(
         modifier = Modifier
@@ -816,7 +814,7 @@ private fun BookChapterPage(
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = chapterRef.bookNameRu.uppercase(),
+                        text = pageRef.bookNameRu.uppercase(),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Serif,
@@ -824,7 +822,7 @@ private fun BookChapterPage(
                         letterSpacing = 2.sp
                     )
                     Text(
-                        text = "ГЛАВА ${chapterRef.chapter}",
+                        text = if (pageRef.isFirstPageOfChapter) "ГЛАВА ${pageRef.chapter}" else "ГЛАВА ${pageRef.chapter} (ст. ${pageRef.startVerse}–${pageRef.endVerse})",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         fontFamily = FontFamily.Serif,
@@ -841,17 +839,8 @@ private fun BookChapterPage(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
-            // Содержимое стихов главы
-            if (verses == null) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = AccentGold, modifier = Modifier.size(32.dp))
-                }
-            } else if (verses.isEmpty()) {
+            // Содержимое стихов страницы (БЕЗ вертикального скролла, настоящий книжный разворот!)
+            if (segments.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -859,7 +848,7 @@ private fun BookChapterPage(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Текст главы не найден",
+                        text = "Текст страницы не найден",
                         fontFamily = FontFamily.Serif,
                         color = Color.Gray
                     )
@@ -869,57 +858,77 @@ private fun BookChapterPage(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .verticalScroll(scrollState)
-                        .padding(bottom = 16.dp)
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 8.dp)
                 ) {
-                    // Декоративный заголовок главы
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp, bottom = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (pageRef.isFirstPageOfChapter) {
+                        // Декоративный заголовок первой страницы главы
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp, bottom = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "❖",
+                                    color = AccentGold,
+                                    fontSize = 15.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "ГЛАВА ${pageRef.chapter}",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Serif,
+                                    color = InkDark,
+                                    letterSpacing = 2.sp
+                                )
+                            }
+                        }
+                    } else {
+                        // Элегантный разделитель продолжения главы
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = "❖",
-                                color = AccentGold,
-                                fontSize = 16.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "ГЛАВА ${chapterRef.chapter}",
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = "❖  ст. ${pageRef.startVerse}–${pageRef.endVerse}  ❖",
+                                fontSize = 11.sp,
                                 fontFamily = FontFamily.Serif,
-                                color = InkDark,
-                                letterSpacing = 2.sp
+                                color = InkGold.copy(alpha = 0.7f),
+                                letterSpacing = 1.sp
                             )
                         }
                     }
 
-                    // Отображение стихов
-                    verses.forEach { verseItem ->
+                    // Отображение стихов страницы с плавной стыковкой продолжений
+                    segments.forEach { segment ->
                         val annotatedVerse = buildAnnotatedString {
-                            withStyle(
-                                SpanStyle(
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = DropCapColor,
-                                    baselineShift = BaselineShift.Superscript
-                                )
-                            ) {
-                                append("${verseItem.verse} ")
+                            if (!segment.isContinuation) {
+                                withStyle(
+                                    SpanStyle(
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = DropCapColor,
+                                        baselineShift = BaselineShift.Superscript
+                                    )
+                                ) {
+                                    append("${segment.verse} ")
+                                }
                             }
-                            append(verseItem.text)
+                            append(segment.text)
                         }
 
                         Text(
                             text = annotatedVerse,
-                            fontSize = 17.sp,
-                            lineHeight = 26.sp,
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp,
                             fontFamily = FontFamily.Serif,
                             color = InkDark,
-                            modifier = Modifier.padding(bottom = 8.dp)
+                            modifier = Modifier.padding(bottom = 5.dp)
                         )
                     }
                 }
@@ -961,7 +970,7 @@ private fun BookChapterPage(
 
                 // Канонический номер страницы книги (например: ~ 1 ~)
                 Text(
-                    text = "~ $bookPageNumber ~",
+                    text = "~ ${pageRef.pageNumber} ~",
                     fontSize = 13.sp,
                     fontFamily = FontFamily.Serif,
                     color = InkGold,
